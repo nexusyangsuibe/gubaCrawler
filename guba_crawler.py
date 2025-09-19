@@ -12,8 +12,8 @@ import multiprocessing as mp
 from pathlib import Path
 import pandas as pd
 import numpy as np
-import xlsxwriter
 import traceback
+import xlsxwriter
 import shutil
 import pickle
 import uuid
@@ -24,6 +24,7 @@ import re
 
 # common tool functions are as follows
 def ensureDFCorrectPklDump(df,filepath):
+    # ensure that Dataframe are correctly write into pickle file
     path=Path(filepath)
     pathname=path.parent
     filename=path.name
@@ -38,8 +39,8 @@ def ensureDFCorrectPklDump(df,filepath):
         else:
             pickle.dump(df, open(pathname/f"tmp_{filename}", "wb"))
 
-# 搜寻正确的分块数
 def findBestBulkNum(df,thereshold_GB,best_bulk_num=1):
+    # find the best bulk number that meets the demand that all bulks smaller than thereshold_GB
     for idx in range(best_bulk_num):
         memory_usage_GB=df.iloc[int(len(df)*(idx/best_bulk_num)):int(len(df)*((idx+1)/best_bulk_num))].memory_usage(deep=True).sum()/(1024**3)
         if memory_usage_GB>thereshold_GB:
@@ -48,8 +49,8 @@ def findBestBulkNum(df,thereshold_GB,best_bulk_num=1):
     else:
         return best_bulk_num
 
-# 按分块数输出
 def outputAccording2BestBulkNum(param):
+    # write into excel according to the best bulk number
     df_bulk,fileName,file_rows,thereshold_GB=param
     bulk_num=findBestBulkNum(df_bulk,thereshold_GB)
     if bulk_num==1:
@@ -70,9 +71,8 @@ def outputAccording2BestBulkNum(param):
             workbook.close()
     return None
 
-# 先按照行数阙值分为file_num+1个文件输出，对每个输出文件检查存储空间大小并根据最优文件数输出
 def outputAsXlsx(df,output_filename,output_pathname,thereshold_rows=1000000,thereshold_GB=4):
-    # output the dataframe as xlsx file with divsion within the thereshold_rows and thereshold_GB
+    # output the dataframe into excel with divsions within the thereshold_rows and thereshold_GB
     file_num=int(df.shape[0]//thereshold_rows)
     print(f"共{df.shape[0]}行，文件名为{output_filename}，预计分为{file_num+1}个文件输出")
     if file_num==0:
@@ -90,7 +90,7 @@ def outputAsXlsx(df,output_filename,output_pathname,thereshold_rows=1000000,ther
             df_bulk=df.iloc[file_num*file_rows:]
             fileName=f"{output_pathname}{'' if output_pathname.endswith('/') else '/'}{''.join(output_filename.split('.')[:-1])}_{file_num}.xlsx"
             tasks.append((df_bulk,fileName,file_rows,thereshold_GB))
-        pool=mp.Pool(processes=4)
+        pool=mp.Pool(processes=8)
         pool.map(outputAccording2BestBulkNum,tasks)
     return None
 
@@ -109,7 +109,6 @@ def create_webdriver(headless=True):
         options.add_argument("--inprivate")
         options.add_argument(f"user-data-dir={user_data_dir}")
         options.add_argument(f"disk-cache-dir={cache_dir}")
-        options
         if headless:
             options.add_argument("--headless")
         driver=webdriver.Edge(options=options)
@@ -167,7 +166,7 @@ def create_webdriver(headless=True):
         }
         })();
         """
-        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": xhr_intercept_script})
+        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument",{"source":xhr_intercept_script})
         return driver
     except:
         print("create_webdriver出现错误")
@@ -189,7 +188,7 @@ def human_verify_until_success(driver, stock_code):
     # If the verification condition is no longer met, assume success
     return True
 
-def get_guba_table(stock_code,start_year,current_page):
+def get_guba_table(stock_code,user_defined_start_date,current_page,update_mode=False):
     human_verify_result_this_page=None
     human_verify_result_last_page=None
     try:
@@ -201,11 +200,11 @@ def get_guba_table(stock_code,start_year,current_page):
         if driver.title=="身份核实" or ((iframes:=driver.find_elements(by=By.CLASS_NAME,value="popwscps_d_iframe")) and iframes[0].is_displayed()):
             print(f"{driver.current_url}触发人机验证")
             human_verify_result_this_page=human_verify_until_success(driver,stock_code)
-        if re.search(r"\d{6}",driver.title).group()!=stock_code:
+        if stock_code not in driver.title:
             print(f"{url}已经自动转至其他股吧，休息一小时后继续")
             driver.quit()
-            time.sleep(3600)
-            return get_guba_table(stock_code,start_year,current_page)
+            time.sleep(3600+np.random.normal(30,10))
+            return get_guba_table(stock_code,user_defined_start_date,current_page)
         max_page_num=int(driver.find_elements(by=By.CLASS_NAME,value="nump")[-1].text)
         while True:
             if driver.title=="身份核实" or ((iframes:=driver.find_elements(by=By.CLASS_NAME,value="popwscps_d_iframe")) and iframes[0].is_displayed()):
@@ -219,11 +218,21 @@ def get_guba_table(stock_code,start_year,current_page):
                 df=pd.DataFrame(article_list["re"])[["media_type","post_click_count","post_comment_count","post_forward_count","post_from_num","post_has_pic","post_id","post_display_time","post_last_time","post_publish_time","post_title","post_type","stockbar_code","stockbar_name","user_id","user_is_majia"]]
                 content_navi=[node.find_element(by=By.TAG_NAME,value="a").get_property("href") for node in driver.find_element(by=By.CLASS_NAME,value="listbody").find_elements(by=By.CLASS_NAME,value="title")]
                 df["link_url"]=content_navi
-                start_date=datetime.strptime(min(df["post_publish_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
-                end_date=datetime.strptime(max(df["post_publish_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
-                filepath=f"respawnpoint/{stock_code}/{stock_code}_{current_page}_{start_date}_{end_date}.pkl"
+                start_date1=datetime.strptime(min(df["post_publish_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
+                start_date2=datetime.strptime(min(df["post_display_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
+                start_date3=datetime.strptime(min(df["post_last_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
+                end_date1=datetime.strptime(max(df["post_publish_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
+                end_date2=datetime.strptime(max(df["post_display_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
+                end_date3=datetime.strptime(max(df["post_last_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
+                start_date=sorted([start_date1,start_date2,start_date3],key=lambda x:int(x[:4]))[-1]
+                end_date=sorted([end_date1,end_date2,end_date3],key=lambda x:int(x[:4]))[0]
+                if update_mode:
+                    filepath=f"respawnpoint/{stock_code}/update_tmp_folder/{stock_code}_{current_page}_{start_date}_{end_date}.pkl"
+                else:
+                    filepath=f"respawnpoint/{stock_code}/{stock_code}_{current_page}_{start_date}_{end_date}.pkl"
                 ensureDFCorrectPklDump(df,filepath)
-            if current_page<max_page_num and int(end_date[:4])>start_year:
+                max_page_num=int(driver.find_elements(by=By.CLASS_NAME,value="nump")[-1].text) # update max_page_num because it may increase very fast when crawling
+            if current_page<max_page_num and start_date>=user_defined_start_date:
                 current_page+=1
                 if not articles:
                     url=f"https://guba.eastmoney.com/list,{stock_code}_{current_page}.html"
@@ -233,7 +242,7 @@ def get_guba_table(stock_code,start_year,current_page):
                     continue
                 if human_verify_result_this_page and human_verify_result_last_page:
                     print(f"{stock_code}连续触发人机验证，休息10分钟后继续")
-                    time.sleep(600+np.random.normal(30,15))
+                    time.sleep(600+np.random.normal(30,10))
                 human_verify_result_last_page=human_verify_result_this_page
                 next_page_button=driver.find_element(by=By.CLASS_NAME,value="nextp")
                 actions=ActionChains(driver)
@@ -266,7 +275,7 @@ def get_guba_table(stock_code,start_year,current_page):
         print(f"get_guba_table在处理 https://guba.eastmoney.com/list,{stock_code}_{current_page}.html 时出现错误")
         traceback.print_exc()
         time.sleep(2)
-        return get_guba_table(stock_code=stock_code,start_year=start_year,current_page=current_page)
+        return get_guba_table(stock_code=stock_code,user_defined_start_date=user_defined_start_date,current_page=current_page)
 
 def human_verification(driver,stock_code):
     def flood_fill(img, start, visited):
@@ -408,41 +417,84 @@ def human_verification(driver,stock_code):
         time.sleep(2)
         return "fail"
 
-def generate_concated_table(stock_code):
-    df=pd.concat([pickle.load(open(f"respawnpoint/{stock_code}/"+file,"rb")) for file in os.listdir(f"respawnpoint/{stock_code}") if file.startswith(stock_code)],axis=0)
+def generate_concated_table(stock_code,update_mode=False):
+    if update_mode:
+        df=pd.concat([pickle.load(open(f"respawnpoint/{stock_code}/update_tmp_folder/"+file,"rb")) for file in os.listdir(f"respawnpoint/{stock_code}/update_tmp_folder") if file.startswith(stock_code)],axis=0)
+        original_df_filename=[f"respawnpoint/afinished/{filename}" for filename in os.listdir("respawnpoint/afinished") if filename.startswith(f"{stock_code}_afinished")][0]
+        original_df=pickle.load(open(original_df_filename,"rb"))
+        if "content" in original_df.columns:
+            df["content"] = None
+            df["ip"] = None
+            df["post_user"] = None
+            df["reply"] = None
+        df=pd.concat([original_df,df],axis=0)
+    else:
+        df=pd.concat([pickle.load(open(f"respawnpoint/{stock_code}/"+file,"rb")) for file in os.listdir(f"respawnpoint/{stock_code}") if file.startswith(stock_code)],axis=0)
     df=df.drop_duplicates(subset="link_url")
-    df=df.reset_index().drop("index",axis=1)
-    start_date=datetime.strptime(min(df["post_publish_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
-    end_date=datetime.strptime(max(df["post_publish_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
+    start_date1=datetime.strptime(min(df["post_publish_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
+    start_date2=datetime.strptime(min(df["post_display_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
+    start_date3=datetime.strptime(min(df["post_last_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
+    end_date1=datetime.strptime(max(df["post_publish_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
+    end_date2=datetime.strptime(max(df["post_display_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
+    end_date3=datetime.strptime(max(df["post_last_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
+    start_date=sorted([start_date1,start_date2,start_date3],key=lambda x:int(x[:4]))[-1]
+    end_date=sorted([end_date1,end_date2,end_date3],key=lambda x:int(x[:4]))[0]
     filepath=f"respawnpoint/afinished/{stock_code}_afinished_{start_date}_{end_date}.pkl"
     ensureDFCorrectPklDump(df,filepath)
+    if update_mode:
+        os.remove(original_df_filename)
     return True
 
-def crwal_by_stkcd(param):
-    stock_code,start_year,output_suffix,need_content=param
-    if [file for file in os.listdir("finalresults") if file.startswith(stock_code) and file.endswith(output_suffix)]:
-        print(f"{stock_code}已完成把并输出结果，跳过")
-        return True
+def update2newest_by_stkcd(stock_code,need_content):
+    # 数据更新仅对已经完成爬取，在respawnpoint/afinished中有临时文件的股票代码生效
+    end_date_crawled=[re.search(rf"{stock_code}_afinished_\d{{4}}_\d+_\d+_(\d{{4}}_\d+_\d+)\.pkl",file).group(1) for file in os.listdir(f"respawnpoint/afinished") if file.startswith(stock_code)][0]
+    if end_date_crawled==datetime.now().strftime("%Y-%m-%d"):
+        print(f"{stock_code}的数据已经是最新，跳过数据更新")
+        return None
     if stock_code not in os.listdir("respawnpoint"):
         os.mkdir(f"respawnpoint/{stock_code}")
-    finished_interval=[re.search(r"\d{6}_(\d+)_\d{4}_\d+_\d+_(\d{4})_\d+_\d+\.pkl",file).groups() for file in os.listdir(f"respawnpoint/{stock_code}") if file.startswith(stock_code)]
-    if not finished_interval:
-        result=get_guba_table(stock_code,start_year,current_page=1)
+    if "update_tmp_folder" in os.listdir(f"respawnpoint/{stock_code}"):
+        for file in os.listdir(f"respawnpoint/{stock_code}/update_tmp_folder"):
+            os.remove(f"respawnpoint/{stock_code}/update_tmp_folder/{file}")
     else:
-        finished_interval=[(int(x),int(y)) for x,y in finished_interval]
-        finished_interval.sort()
-        if finished_interval[-1][1]>=start_year:
-            page=finished_interval[-1][0]+1
-            result=get_guba_table(stock_code,start_year,current_page=page)
+        os.mkdir(f"respawnpoint/{stock_code}/update_tmp_folder")
+    get_guba_table(stock_code,end_date_crawled,current_page=1,update_mode=True)
+    generate_concated_table(stock_code,update_mode=True)
+    shutil.rmtree(f"respawnpoint/{stock_code}/update_tmp_folder")
+    if not need_content:
+        print(f"{stock_code}的数据更新已完成")
+    return True
+    
+def crwal_by_stkcd(param):
+    stock_code,user_defined_start_date,update_mode,output_suffix,need_content=param
+    if update_mode:
+        update2newest_by_stkcd(stock_code,need_content)
+    else:
+        if [file for file in os.listdir("finalresults") if file.startswith(stock_code) and file.endswith(output_suffix)]:
+            print(f"{stock_code}已完成把并输出结果，跳过")
+            return True
+        if stock_code not in os.listdir("respawnpoint"):
+            os.mkdir(f"respawnpoint/{stock_code}")
+        finished_interval=[re.search(rf"{stock_code}_(\d+)_(\d{{4}}_\d+_\d+)_\d{{4}}_\d+_\d+\.pkl",file).groups() for file in os.listdir(f"respawnpoint/{stock_code}") if file.startswith(stock_code)]
+        if not finished_interval:
+            result=get_guba_table(stock_code,user_defined_start_date,current_page=1)
         else:
-            result=True
-    if not [file for file in os.listdir("respawnpoint/afinished") if file.startswith(stock_code)]:
-        generate_concated_table(stock_code)
+            finished_interval=[(int(x),y) for x,y in finished_interval]
+            finished_interval.sort()
+            if finished_interval[-1][1]>=user_defined_start_date:
+                page=finished_interval[-1][0]+1
+                result=get_guba_table(stock_code,user_defined_start_date,current_page=page)
+            else:
+                result=True
+        if not [file for file in os.listdir("respawnpoint/afinished") if file.startswith(stock_code)]:
+            generate_concated_table(stock_code)
     if need_content:
-        while True: # it is a bug that the program will begin to tackle another stock before the processing code is done, so I write a loop to detect the accomplishment rather than if need_content and not [file for file in os.listdir("respawnpoint/finished") if file.startswith(stock_code)]
-            if [file for file in os.listdir("respawnpoint/finished") if file.startswith(stock_code)]:
-                break
+        if update_mode:
             result=get_guba_content(stock_code,continuous404=0)
+            print(f"{stock_code}的数据更新已完成")
+        else:
+            if not [file for file in os.listdir("respawnpoint/finished") if file.startswith(stock_code)]:
+                result=get_guba_content(stock_code,continuous404=0)
     if result and output_suffix:
         if need_content:
             filename=[file for file in os.listdir("respawnpoint/finished") if file.startswith(stock_code)][0]
@@ -563,9 +615,9 @@ def get_guba_content(stock_code, continuous404=0):
                 replies[seg_offset] = reply
                 
                 # Handle continuous 404 scenario
-                if continuous404 > 5:
+                if continuous404 > 10:
                     print(f"已经连续404 Not Found {continuous404} 次，休息一小时后继续")
-                    time.sleep(3600)
+                    time.sleep(3600+np.random.normal(30,10))
                     # Optionally, you may want to reset continuous404 or adjust current_idx accordingly.
                     # Here, we go back a few indices if needed.
                     idx = max(current_idx, idx - continuous404)
@@ -573,7 +625,7 @@ def get_guba_content(stock_code, continuous404=0):
                     idx += 1
                     if human_verify_result_this_page and human_verify_result_last_page:
                         print(f"{stock_code}连续触发人机验证，休息10分钟后继续")
-                        time.sleep(600+np.random.normal(30,15))
+                        time.sleep(600+np.random.normal(30,10))
                     human_verify_result_last_page=human_verify_result_this_page
 
             # Update the DataFrame with the newly collected data
@@ -603,20 +655,12 @@ def get_guba_content(stock_code, continuous404=0):
 
 
 if __name__=="__main__":
-    start_year=2014 # 从那一年开始（按publish_date算）
-    sse50_codes = [
-    "600000", "600004", "600009", "600010", "600011", "600015", "600016", "600018",
-    "600021", "600028", "600029", "600030", "600036", "600048", "600050", "600104",
-    "600111", "600115", "600118", "600150", "600170", "600276", "600309", "600340",
-    "600519", "600547", "600585", "600688", "600690", "600703", "600705", "600741",
-    "600795", "600837", "600919", "600999", "601009", "601166", "601169", "601186",
-    "601288", "601318", "601328", "601336", "601601", "601628", "601766", "601857",
-    "601880", "601989"
-    ]
+    user_defined_start_date="2014-01-01" # 请以YYYY-MM-DD格式输入，从那一天开始（按publish_date, display_date, last_date孰高计算，三者都低于user_defined_start_date时爬取结束）
     hs300_codes=['000001', '000002', '000063', '000100', '000157', '000166', '000301', '000333', '000338', '000408', '000425', '000538', '000568', '000596', '000617', '000625', '000630', '000651', '000661', '000708', '000725', '000768', '000776', '000786', '000792', '000800', '000807', '000858', '000876', '000895', '000938', '000963', '000975', '000977', '000983', '000999', '001289', '001965', '001979', '002001', '002007', '002027', '002028', '002049', '002050', '002074', '002129', '002142', '002179', '002180', '002230', '002236', '002241', '002252', '002271', '002304', '002311', '002352', '002371', '002415', '002422', '002459', '002460', '002463', '002466', '002475', '002493', '002555', '002594', '002601', '002648', '002709', '002714', '002736', '002812', '002916', '002920', '002938', '003816', '300014', '300015', '300033', '300059', '300122', '300124', '300274', '300308', '300316', '300347', '300394', '300408', '300413', '300418', '300433', '300442', '300450', '300498', '300502', '300628', '300661', '300750', '300759', '300760', '300782', '300832', '300896', '300979', '300999', '301269', '600000', '600009', '600010', '600011', '600015', '600016', '600018', '600019', '600023', '600025', '600026', '600027', '600028', '600029', '600030', '600031', '600036', '600039', '600048', '600050', '600061', '600066', '600085', '600089', '600104', '600111', '600115', '600150', '600160', '600161', '600176', '600183', '600188', '600196', '600219', '600233', '600276', '600309', '600332', '600346', '600362', '600372', '600377', '600406', '600415', '600426', '600436', '600438', '600460', '600482', '600489', '600515', '600519', '600547', '600570', '600584', '600585', '600588', '600600', '600660', '600674', '600690', '600741', '600745', '600760', '600795', '600803', '600809', '600845', '600875', '600886', '600887', '600893', '600900', '600905', '600918', '600919', '600926', '600938', '600941', '600958', '600989', '600999', '601006', '601009', '601012', '601021', '601058', '601059', '601066', '601088', '601100', '601111', '601117', '601127', '601136', '601138', '601166', '601169', '601186', '601211', '601225', '601229', '601236', '601238', '601288', '601318', '601319', '601328', '601336', '601360', '601377', '601390', '601398', '601600', '601601', '601607', '601618', '601628', '601633', '601658', '601668', '601669', '601688', '601689', '601698', '601699', '601728', '601766', '601788', '601799', '601800', '601808', '601816', '601818', '601838', '601857', '601865', '601868', '601872', '601877', '601878', '601881', '601888', '601898', '601899', '601901', '601916', '601919', '601939', '601985', '601988', '601989', '601995', '601998', '603019', '603195', '603259', '603260', '603288', '603296', '603369', '603392', '603501', '603659', '603799', '603806', '603833', '603986', '603993', '605117', '605499', '688008', '688009', '688012', '688036', '688041', '688082', '688111', '688126', '688169', '688187', '688223', '688256', '688271', '688303', '688396', '688472', '688506', '688599', '688981']
-    stock_codes=hs300_codes[:8] # 股票代码（6位数字，不要后缀），列表格式
+    stock_codes=hs300_codes # 股票代码（6位数字，不要后缀），列表格式
     output_suffix=".xlsx" # 输出文件后缀，可选.xlsx, .pkl, .csv
     need_content=False # 是否需要进入链接获取文章正文和ip地址
+    update_mode=False # 是否使用更新模式，更新模式可以将已经完成爬取的数据更新到最新，仅对已经完成爬取、在respawnpoint/afinished文件夹中有临时文件的股票代码生效
     if "respawnpoint" not in os.listdir():
         print(f"在工作目录{os.getcwd()}下未找到用于存储临时文件的respawnpoint文件夹，将自动创建")
         os.mkdir("respawnpoint")
@@ -630,17 +674,27 @@ if __name__=="__main__":
         os.mkdir("respawnpoint/afinished")
     if "finished" not in os.listdir("respawnpoint"):
         os.mkdir("respawnpoint/finished")
-    pool=mp.Pool(processes=4)
+    if update_mode:
+        if [file for file in os.listdir("respawnpoint/afinished")]:
+            stock_codes_afinished=[re.search(r"(.+)_afinished_\d{4}_\d+_\d+_\d{4}_\d+_\d+\.pkl",file).group(1) for file in os.listdir(f"respawnpoint/afinished")]
+            stock_codes=[stock_code for stock_code in stock_codes_afinished if stock_code in stock_codes]
+        else:
+            stock_codes=[]
+        if not stock_codes:
+            raise RuntimeError("在respawnpoint/afinished文件夹内没有发现符合要求的已经完成爬取的股票代码，无法使用更新模式")
+        print(f"可以执行数据更新操作的股票代码为{stock_codes}")
+    pool=mp.Pool(processes=2)
     try:
-        pool.imap(crwal_by_stkcd,[(stock_code,start_year,output_suffix,need_content) for stock_code in stock_codes])
+        pool.imap(crwal_by_stkcd,[(stock_code,user_defined_start_date,update_mode,output_suffix,need_content) for stock_code in stock_codes])
     except Exception as e:
         print("Caught an error:", e)
         pool.terminate()  # Optionally terminate the pool to stop further processing.
     finally:
         pool.close()
         pool.join()
+    # debug
     # for stock_code in stock_codes:
-    #     result=crwal_by_stkcd((stock_code,start_year,output_suffix,need_content))
+    #     result=crwal_by_stkcd((stock_code,user_defined_start_date,update_mode,output_suffix,need_content))
     if "tmpfiles" in os.listdir():
         shutil.rmtree("tmpfiles")
     print("程序运行结束")
