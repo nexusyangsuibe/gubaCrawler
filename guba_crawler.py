@@ -6,6 +6,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import ElementClickInterceptedException
 from PIL import Image,ImageChops,ImageDraw
+from collections.abc import Iterable
 from datetime import datetime
 from collections import deque
 import multiprocessing as mp
@@ -52,12 +53,14 @@ def findBestBulkNum(df,thereshold_GB,best_bulk_num=1):
 def outputAccording2BestBulkNum(param):
     # write into excel according to the best bulk number
     df_bulk,fileName,file_rows,thereshold_GB=param
+    df_bulk=df_bulk.map(lambda x: str(x) if isinstance(x,Iterable) and not isinstance(x,str) else x)
     bulk_num=findBestBulkNum(df_bulk,thereshold_GB)
     if bulk_num==1:
         workbook=xlsxwriter.Workbook(fileName,{'constant_memory':True,"strings_to_urls":False,"nan_inf_to_errors":True})
         worksheet=workbook.add_worksheet()
+        worksheet.write_row(0,0,df_bulk.columns)
         for row_idx,row in enumerate(df_bulk.itertuples(index=False),start=0):
-            worksheet.write_row(row_idx,0,row)
+            worksheet.write_row(row_idx+1,0,row)
         workbook.close()
     else:
         print(f"文件{fileName}所需的存储空间超过阙值{thereshold_GB}GB，再分为{bulk_num}个文件输出")
@@ -66,8 +69,9 @@ def outputAccording2BestBulkNum(param):
             print(f"正在写入{fileName_}")
             workbook=xlsxwriter.Workbook(fileName_,{'constant_memory':True,"strings_to_urls":False,"nan_inf_to_errors":True})
             worksheet=workbook.add_worksheet()
+            worksheet.write_row(0,0,df_bulk.columns)
             for row_idx,row in enumerate(df_bulk.iloc[int(file_rows*(iidx/bulk_num)):int(file_rows*((iidx+1)/bulk_num))].itertuples(index=False),start=0):
-                worksheet.write_row(row_idx,0,row)
+                worksheet.write_row(row_idx+1,0,row)
             workbook.close()
     return None
 
@@ -224,8 +228,8 @@ def get_guba_table(stock_code,user_defined_start_date,current_page,update_mode=F
                 end_date1=datetime.strptime(max(df["post_publish_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
                 end_date2=datetime.strptime(max(df["post_display_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
                 end_date3=datetime.strptime(max(df["post_last_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
-                start_date=sorted([start_date1,start_date2,start_date3],key=lambda x:int(x[:4]))[-1]
-                end_date=sorted([end_date1,end_date2,end_date3],key=lambda x:int(x[:4]))[0]
+                start_date=sorted([start_date1,start_date2,start_date3])[-1]
+                end_date=sorted([end_date1,end_date2,end_date3])[0]
                 if update_mode:
                     filepath=f"respawnpoint/{stock_code}/update_tmp_folder/{stock_code}_{current_page}_{start_date}_{end_date}.pkl"
                 else:
@@ -431,14 +435,16 @@ def generate_concated_table(stock_code,update_mode=False):
     else:
         df=pd.concat([pickle.load(open(f"respawnpoint/{stock_code}/"+file,"rb")) for file in os.listdir(f"respawnpoint/{stock_code}") if file.startswith(stock_code)],axis=0)
     df=df.drop_duplicates(subset="link_url")
+    df.reset_index(inplace=True)
+    df.drop("index",axis=1,inplace=True)
     start_date1=datetime.strptime(min(df["post_publish_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
     start_date2=datetime.strptime(min(df["post_display_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
     start_date3=datetime.strptime(min(df["post_last_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
     end_date1=datetime.strptime(max(df["post_publish_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
     end_date2=datetime.strptime(max(df["post_display_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
     end_date3=datetime.strptime(max(df["post_last_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
-    start_date=sorted([start_date1,start_date2,start_date3],key=lambda x:int(x[:4]))[-1]
-    end_date=sorted([end_date1,end_date2,end_date3],key=lambda x:int(x[:4]))[0]
+    start_date=sorted([start_date1,start_date2,start_date3])[-1]
+    end_date=sorted([end_date1,end_date2,end_date3])[0]
     filepath=f"respawnpoint/afinished/{stock_code}_afinished_{start_date}_{end_date}.pkl"
     ensureDFCorrectPklDump(df,filepath)
     if update_mode:
@@ -458,17 +464,17 @@ def update2newest_by_stkcd(stock_code,need_content):
             os.remove(f"respawnpoint/{stock_code}/update_tmp_folder/{file}")
     else:
         os.mkdir(f"respawnpoint/{stock_code}/update_tmp_folder")
-    get_guba_table(stock_code,end_date_crawled,current_page=1,update_mode=True)
+    result=get_guba_table(stock_code,end_date_crawled,current_page=1,update_mode=True)
     generate_concated_table(stock_code,update_mode=True)
     shutil.rmtree(f"respawnpoint/{stock_code}/update_tmp_folder")
     if not need_content:
         print(f"{stock_code}的数据更新已完成")
-    return True
+    return result
     
 def crwal_by_stkcd(param):
     stock_code,user_defined_start_date,update_mode,output_suffix,need_content=param
     if update_mode:
-        update2newest_by_stkcd(stock_code,need_content)
+        result=update2newest_by_stkcd(stock_code,need_content)
     else:
         if [file for file in os.listdir("finalresults") if file.startswith(stock_code) and file.endswith(output_suffix)]:
             print(f"{stock_code}已完成把并输出结果，跳过")
@@ -482,7 +488,7 @@ def crwal_by_stkcd(param):
             finished_interval=[(int(x),y) for x,y in finished_interval]
             finished_interval.sort()
             if finished_interval[-1][1]>=user_defined_start_date:
-                page=finished_interval[-1][0]+1
+                page=finished_interval[-1][0] # sometimes there may be a funny situation, that the number of pages is decreasing rather than increasing because lots of posts are deleted
                 result=get_guba_table(stock_code,user_defined_start_date,current_page=page)
             else:
                 result=True
@@ -561,7 +567,7 @@ def get_guba_content(stock_code, continuous404=0):
                     idx += 1
                     continue
 
-                url = link_urls.loc[idx]
+                url = link_urls.at[idx]
                 content = ip = post_user = reply = None
                 
                 if "guba.eastmoney.com" in url or "caifuhao.eastmoney.com" in url:
@@ -655,11 +661,11 @@ def get_guba_content(stock_code, continuous404=0):
 
 
 if __name__=="__main__":
-    user_defined_start_date="2014-01-01" # 请以YYYY-MM-DD格式输入，从那一天开始（按publish_date, display_date, last_date孰高计算，三者都低于user_defined_start_date时爬取结束）
+    user_defined_start_date="2025-08-31" # 请以YYYY-MM-DD格式输入，从那一天开始（按publish_date, display_date, last_date孰高计算，三者都低于user_defined_start_date时爬取结束）
     hs300_codes=['000001', '000002', '000063', '000100', '000157', '000166', '000301', '000333', '000338', '000408', '000425', '000538', '000568', '000596', '000617', '000625', '000630', '000651', '000661', '000708', '000725', '000768', '000776', '000786', '000792', '000800', '000807', '000858', '000876', '000895', '000938', '000963', '000975', '000977', '000983', '000999', '001289', '001965', '001979', '002001', '002007', '002027', '002028', '002049', '002050', '002074', '002129', '002142', '002179', '002180', '002230', '002236', '002241', '002252', '002271', '002304', '002311', '002352', '002371', '002415', '002422', '002459', '002460', '002463', '002466', '002475', '002493', '002555', '002594', '002601', '002648', '002709', '002714', '002736', '002812', '002916', '002920', '002938', '003816', '300014', '300015', '300033', '300059', '300122', '300124', '300274', '300308', '300316', '300347', '300394', '300408', '300413', '300418', '300433', '300442', '300450', '300498', '300502', '300628', '300661', '300750', '300759', '300760', '300782', '300832', '300896', '300979', '300999', '301269', '600000', '600009', '600010', '600011', '600015', '600016', '600018', '600019', '600023', '600025', '600026', '600027', '600028', '600029', '600030', '600031', '600036', '600039', '600048', '600050', '600061', '600066', '600085', '600089', '600104', '600111', '600115', '600150', '600160', '600161', '600176', '600183', '600188', '600196', '600219', '600233', '600276', '600309', '600332', '600346', '600362', '600372', '600377', '600406', '600415', '600426', '600436', '600438', '600460', '600482', '600489', '600515', '600519', '600547', '600570', '600584', '600585', '600588', '600600', '600660', '600674', '600690', '600741', '600745', '600760', '600795', '600803', '600809', '600845', '600875', '600886', '600887', '600893', '600900', '600905', '600918', '600919', '600926', '600938', '600941', '600958', '600989', '600999', '601006', '601009', '601012', '601021', '601058', '601059', '601066', '601088', '601100', '601111', '601117', '601127', '601136', '601138', '601166', '601169', '601186', '601211', '601225', '601229', '601236', '601238', '601288', '601318', '601319', '601328', '601336', '601360', '601377', '601390', '601398', '601600', '601601', '601607', '601618', '601628', '601633', '601658', '601668', '601669', '601688', '601689', '601698', '601699', '601728', '601766', '601788', '601799', '601800', '601808', '601816', '601818', '601838', '601857', '601865', '601868', '601872', '601877', '601878', '601881', '601888', '601898', '601899', '601901', '601916', '601919', '601939', '601985', '601988', '601989', '601995', '601998', '603019', '603195', '603259', '603260', '603288', '603296', '603369', '603392', '603501', '603659', '603799', '603806', '603833', '603986', '603993', '605117', '605499', '688008', '688009', '688012', '688036', '688041', '688082', '688111', '688126', '688169', '688187', '688223', '688256', '688271', '688303', '688396', '688472', '688506', '688599', '688981']
     stock_codes=hs300_codes # 股票代码（6位数字，不要后缀），列表格式
     output_suffix=".xlsx" # 输出文件后缀，可选.xlsx, .pkl, .csv
-    need_content=False # 是否需要进入链接获取文章正文和ip地址
+    need_content=True # 是否需要进入链接获取文章正文和ip地址
     update_mode=False # 是否使用更新模式，更新模式可以将已经完成爬取的数据更新到最新，仅对已经完成爬取、在respawnpoint/afinished文件夹中有临时文件的股票代码生效
     if "respawnpoint" not in os.listdir():
         print(f"在工作目录{os.getcwd()}下未找到用于存储临时文件的respawnpoint文件夹，将自动创建")
@@ -683,6 +689,8 @@ if __name__=="__main__":
         if not stock_codes:
             raise RuntimeError("在respawnpoint/afinished文件夹内没有发现符合要求的已经完成爬取的股票代码，无法使用更新模式")
         print(f"可以执行数据更新操作的股票代码为{stock_codes}")
+    user_defined_start_date=user_defined_start_date.replace("-","_")
+    # multiprocessing
     pool=mp.Pool(processes=2)
     try:
         pool.imap(crwal_by_stkcd,[(stock_code,user_defined_start_date,update_mode,output_suffix,need_content) for stock_code in stock_codes])
