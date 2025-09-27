@@ -24,21 +24,26 @@ import os
 import re
 
 # common tool functions are as follows
-def ensureDFCorrectPklDump(df,filepath):
-    # ensure that Dataframe are correctly write into pickle file
+def ensureCorrectPklDump(obj,filepath):
+    # ensure that objects written into pickle files can be read normally to avoid corrupted writing
+    fail=0
     path=Path(filepath)
     pathname=path.parent
     filename=path.name
-    pickle.dump(df, open(pathname/f"tmp_{filename}", "wb"))
+    pickle.dump(obj,open(pathname/f"tmp_{filename}", "wb"))
     while True:
-        saved_df=pickle.load(open(pathname/f"tmp_{filename}","rb"))
-        if saved_df.equals(df):
-            if os.path.exists(path):
-                os.remove(path)
-            os.rename(pathname/f"tmp_{filename}",path)
-            return None
-        else:
-            pickle.dump(df, open(pathname/f"tmp_{filename}", "wb"))
+        if fail>2:
+            raise RuntimeError(f"写入pickle文件已经失败了{fail}次，请检查写入对象的完整性")
+        try:
+            pickle.load(open(pathname/f"tmp_{filename}","rb"))
+            break
+        except:
+            fail+=1
+            pickle.dump(obj,open(pathname/f"tmp_{filename}","wb"))
+    if os.path.exists(path):
+        os.remove(path)
+    os.rename(pathname/f"tmp_{filename}",path)
+    return None
 
 def findBestBulkNum(df,thereshold_GB,best_bulk_num=1):
     # find the best bulk number that meets the demand that all bulks smaller than thereshold_GB
@@ -234,7 +239,7 @@ def get_guba_table(stock_code,user_defined_start_date,current_page,update_mode=F
                     filepath=f"respawnpoint/{stock_code}/update_tmp_folder/{stock_code}_{current_page}_{start_date}_{end_date}.pkl"
                 else:
                     filepath=f"respawnpoint/{stock_code}/{stock_code}_{current_page}_{start_date}_{end_date}.pkl"
-                ensureDFCorrectPklDump(df,filepath)
+                ensureCorrectPklDump(df,filepath)
                 max_page_num=int(driver.find_elements(by=By.CLASS_NAME,value="nump")[-1].text) # update max_page_num because it may increase very fast when crawling
             if current_page<max_page_num and start_date>=user_defined_start_date:
                 current_page+=1
@@ -446,7 +451,7 @@ def generate_concated_table(stock_code,update_mode=False):
     start_date=sorted([start_date1,start_date2,start_date3])[-1]
     end_date=sorted([end_date1,end_date2,end_date3])[0]
     filepath=f"respawnpoint/afinished/{stock_code}_afinished_{start_date}_{end_date}.pkl"
-    ensureDFCorrectPklDump(df,filepath)
+    ensureCorrectPklDump(df,filepath)
     if update_mode:
         os.remove(original_df_filename)
     return True
@@ -511,7 +516,7 @@ def crwal_by_stkcd(param):
         filename="".join(filename.split(".")[:-1])
         if output_suffix==".pkl":
             filepath=f"finalresults/{filename}.pkl"
-            ensureDFCorrectPklDump(df,filepath)
+            ensureCorrectPklDump(df,filepath)
         elif output_suffix==".xlsx":
             outputAsXlsx(df,filename+".xlsx","finalresults")
         elif output_suffix==".csv":
@@ -640,7 +645,7 @@ def get_guba_content(stock_code, continuous404=0):
             df.loc[segment_range, "post_user"] = pd.Series(post_users, index=segment_range, dtype="object")
             df.loc[segment_range, "reply"] = pd.Series(replies, index=segment_range, dtype="object")
             filepath=f"respawnpoint/afinished/{filename}"
-            ensureDFCorrectPklDump(df,filepath)
+            ensureCorrectPklDump(df,filepath)
             print(f"{stock_code}已完成{to_rows}/{len_df}")
             
             # If the current segment is done, move to the next segment
@@ -648,7 +653,7 @@ def get_guba_content(stock_code, continuous404=0):
         
         # Once fully completed, store the finished file.
         filepath=f"respawnpoint/finished/{filename}"
-        ensureDFCorrectPklDump(df,filepath)
+        ensureCorrectPklDump(df,filepath)
         driver.quit()
         return True
 
