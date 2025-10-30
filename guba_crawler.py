@@ -214,7 +214,13 @@ def get_guba_table(stock_code,user_defined_start_date,current_page,update_mode=F
             driver.quit()
             time.sleep(3600+np.random.normal(30,10))
             return get_guba_table(stock_code,user_defined_start_date,current_page)
-        max_page_num=int(driver.find_elements(by=By.CLASS_NAME,value="nump")[-1].text)
+        if pages:=driver.find_elements(by=By.CLASS_NAME,value="nump"):
+            max_page_num=int(pages[-1].text)
+        else:
+            if driver.find_elements(by=By.ID,value="emptylist"):
+                max_page_num=current_page
+            else:
+                max_page_num=current_page+1
         while True:
             if driver.title=="身份核实" or ((iframes:=driver.find_elements(by=By.CLASS_NAME,value="popwscps_d_iframe")) and iframes[0].is_displayed()):
                 print(f"{driver.current_url}触发人机验证")
@@ -223,9 +229,9 @@ def get_guba_table(stock_code,user_defined_start_date,current_page,update_mode=F
                 human_verify_result_this_page=None
             article_list=driver.execute_script("return article_list")
             articles=article_list["re"]
-            if articles:
+            if articles and (list_bodies:=driver.find_elements(by=By.CLASS_NAME,value="listbody")):
                 df=pd.DataFrame(article_list["re"])[["media_type","post_click_count","post_comment_count","post_forward_count","post_from_num","post_has_pic","post_id","post_display_time","post_last_time","post_publish_time","post_title","post_type","stockbar_code","stockbar_name","user_id","user_is_majia"]]
-                content_navi=[node.find_element(by=By.TAG_NAME,value="a").get_property("href") for node in driver.find_element(by=By.CLASS_NAME,value="listbody").find_elements(by=By.CLASS_NAME,value="title")]
+                content_navi=[node.find_element(by=By.TAG_NAME,value="a").get_property("href") for node in list_bodies[0].find_elements(by=By.CLASS_NAME,value="title")]
                 df["link_url"]=content_navi
                 start_date1=datetime.strptime(min(df["post_publish_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
                 start_date2=datetime.strptime(min(df["post_display_time"]),"%Y-%m-%d %H:%M:%S").strftime("%Y_%m_%d")
@@ -240,7 +246,10 @@ def get_guba_table(stock_code,user_defined_start_date,current_page,update_mode=F
                 else:
                     filepath=f"respawnpoint/{stock_code}/{stock_code}_{current_page}_{start_date}_{end_date}.pkl"
                 ensureCorrectPklDump(df,filepath)
-                max_page_num=int(driver.find_elements(by=By.CLASS_NAME,value="nump")[-1].text) # update max_page_num because it may increase very fast when crawling
+                if pages:=driver.find_elements(by=By.CLASS_NAME,value="nump"):
+                    max_page_num=int(pages[-1].text) # update max_page_num because it may increase very fast when crawling
+                elif driver.find_elements(by=By.ID,value="emptylist"):
+                        max_page_num=current_page
             if current_page<max_page_num and start_date>=user_defined_start_date:
                 current_page+=1
                 if not articles:
