@@ -183,13 +183,13 @@ def create_webdriver(headless=True):
         time.sleep(2)
         return create_webdriver(headless=headless)
 
-def human_verify_until_success(driver,stock_code,original_url):
-    while driver.title=="身份核实" or (
-        (iframes:=driver.find_elements(by=By.CLASS_NAME, value="popwscps_d_iframe"))
+def human_verify_until_success(driver, stock_code):
+    while driver.title == "身份核实" or (
+        (iframes := driver.find_elements(by=By.CLASS_NAME, value="popwscps_d_iframe"))
         and iframes[0].is_displayed()
     ):
         driver.execute_script("typeof tk_tg_zoomin === 'function' && tk_tg_zoomin()")
-        verified=human_verification(driver,stock_code,original_url)
+        verified = human_verification(driver, stock_code)
         if verified=="fail":
             driver.refresh()
         # else verified=="double check", just wait a second, be careful not to refresh the browser
@@ -208,7 +208,7 @@ def get_guba_table(stock_code,user_defined_start_date,current_page,update_mode=F
         driver.execute_script("typeof tk_tg_zoomin === 'function' && tk_tg_zoomin()")
         if driver.title=="身份核实" or ((iframes:=driver.find_elements(by=By.CLASS_NAME,value="popwscps_d_iframe")) and iframes[0].is_displayed()):
             print(f"{driver.current_url}触发人机验证")
-            human_verify_result_this_page=human_verify_until_success(driver,stock_code,original_url=url)
+            human_verify_result_this_page=human_verify_until_success(driver,stock_code)
         if stock_code not in driver.title:
             print(f"{url}已经自动转至其他股吧，休息一小时后继续")
             driver.quit()
@@ -224,7 +224,7 @@ def get_guba_table(stock_code,user_defined_start_date,current_page,update_mode=F
         while True:
             if driver.title=="身份核实" or ((iframes:=driver.find_elements(by=By.CLASS_NAME,value="popwscps_d_iframe")) and iframes[0].is_displayed()):
                 print(f"{driver.current_url}触发人机验证")
-                human_verify_result_this_page=human_verify_until_success(driver,stock_code,original_url=url)
+                human_verify_result_this_page=human_verify_until_success(driver,stock_code)
             else:
                 human_verify_result_this_page=None
             article_list=driver.execute_script("return article_list")
@@ -249,12 +249,11 @@ def get_guba_table(stock_code,user_defined_start_date,current_page,update_mode=F
             if pages:=driver.find_elements(by=By.CLASS_NAME,value="nump"):
                 max_page_num=int(pages[-1].text) # update max_page_num because it may increase very fast when crawling
             elif driver.find_elements(by=By.ID,value="emptylist"):
-                max_page_num=current_page
+                    max_page_num=current_page
             if current_page<max_page_num and start_date>=user_defined_start_date:
                 current_page+=1
-                url=f"https://guba.eastmoney.com/list,{stock_code}_{current_page}.html"
-                next_page_button=driver.find_elements(by=By.CLASS_NAME,value="nextp")
-                if not next_page_button:
+                if not articles:
+                    url=f"https://guba.eastmoney.com/list,{stock_code}_{current_page}.html"
                     human_verify_result_last_page=human_verify_result_this_page
                     driver.get(url)
                     time.sleep(1)
@@ -263,7 +262,7 @@ def get_guba_table(stock_code,user_defined_start_date,current_page,update_mode=F
                     print(f"{stock_code}连续触发人机验证，休息10分钟后继续")
                     time.sleep(600+np.random.normal(30,10))
                 human_verify_result_last_page=human_verify_result_this_page
-                next_page_button=next_page_button[0]
+                next_page_button=driver.find_element(by=By.CLASS_NAME,value="nextp")
                 actions=ActionChains(driver)
                 actions.move_to_element(next_page_button).perform()
                 try:
@@ -296,7 +295,7 @@ def get_guba_table(stock_code,user_defined_start_date,current_page,update_mode=F
         time.sleep(2)
         return get_guba_table(stock_code=stock_code,user_defined_start_date=user_defined_start_date,current_page=current_page)
 
-def human_verification(driver,stock_code,original_url):
+def human_verification(driver,stock_code):
     def flood_fill(img, start, visited):
         """Perform flood fill and return all connected white pixel coordinates."""
         width, height = img.size
@@ -343,7 +342,7 @@ def human_verification(driver,stock_code,original_url):
         iframe=iframes[0]
         if iframe.is_displayed():
             driver.switch_to.frame(iframe)
-            return human_verification(driver,stock_code,original_url)
+            return human_verification(driver,stock_code)
     try:
         wait=WebDriverWait(driver,90)  # Wait up to 90 seconds, sometimes the background image is loaded slowly
         wait.until(EC.visibility_of_element_located((By.CLASS_NAME,"em_cut_fullbg")))
@@ -420,8 +419,6 @@ def human_verification(driver,stock_code,original_url):
             driver.switch_to.default_content()
             print("人机验证成功")
             time.sleep(2)
-            driver.get(original_url)
-            time.sleep(1)
             if driver.title!="身份核实" and not (iframes and iframes[0].is_displayed()) and not ((divCaptcha:=driver.find_elements(by=By.ID,value="divCaptcha")) and divCaptcha[0].is_displayed()):
                 return "success"
             else:
@@ -595,7 +592,7 @@ def get_guba_content(stock_code, continuous404=0):
                     if (driver.title == "身份核实" or
                         (iframes := driver.find_elements(by=By.CLASS_NAME, value="popwscps_d_iframe")) and iframes[0].is_displayed()):
                         print(f"{driver.current_url}触发人机验证，正在爬取的股吧为{stock_code}")
-                        human_verify_result_this_page=human_verify_until_success(driver, stock_code,original_url=url)
+                        human_verify_result_this_page=human_verify_until_success(driver, stock_code)
                     else:
                         human_verify_result_this_page=None
                     
