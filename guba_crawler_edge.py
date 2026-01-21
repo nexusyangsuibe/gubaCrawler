@@ -40,9 +40,7 @@ def ensureCorrectPklDump(obj,filepath):
         except:
             fail+=1
             pickle.dump(obj,open(pathname/f"tmp_{filename}","wb"))
-    if os.path.exists(path):
-        os.remove(path)
-    os.rename(pathname/f"tmp_{filename}",path)
+    os.replace(pathname/f"tmp_{filename}",path)
     return None
 
 def findBestBulkNum(df,thereshold_GB,best_bulk_num=1):
@@ -261,7 +259,7 @@ def get_guba_table(stock_code,user_defined_start_date,current_page,update_mode=F
                     continue
                 if human_verify_result_this_page and human_verify_result_last_page:
                     print(f"{stock_code}连续触发人机验证，休息10分钟后继续")
-                    time.sleep(600+np.random.normal(30,10))
+                    time.sleep(660+np.random.normal(30,10))
                 human_verify_result_last_page=human_verify_result_this_page
                 next_page_button=next_page_button[0]
                 actions=ActionChains(driver)
@@ -420,8 +418,8 @@ def human_verification(driver,stock_code,original_url):
             driver.switch_to.default_content()
             print("人机验证成功")
             time.sleep(2)
-            driver.get(original_url)
-            time.sleep(1)
+            # driver.get(original_url)
+            # time.sleep(1)
             if driver.title!="身份核实" and not (iframes and iframes[0].is_displayed()) and not ((divCaptcha:=driver.find_elements(by=By.ID,value="divCaptcha")) and divCaptcha[0].is_displayed()):
                 return "success"
             else:
@@ -638,7 +636,7 @@ def get_guba_content(stock_code, continuous404=0):
                 replies[seg_offset] = reply
                 
                 # Handle continuous 404 scenario
-                if continuous404 > 10:
+                if continuous404 > 12:
                     print(f"已经连续404 Not Found {continuous404} 次，休息一小时后继续")
                     time.sleep(3600+np.random.normal(30,10))
                     # Optionally, you may want to reset continuous404 or adjust current_idx accordingly.
@@ -648,7 +646,7 @@ def get_guba_content(stock_code, continuous404=0):
                     idx += 1
                     if human_verify_result_this_page and human_verify_result_last_page:
                         print(f"{stock_code}连续触发人机验证，休息10分钟后继续")
-                        time.sleep(600+np.random.normal(30,10))
+                        time.sleep(660+np.random.normal(30,10))
                     human_verify_result_last_page=human_verify_result_this_page
 
             # Update the DataFrame with the newly collected data
